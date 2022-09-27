@@ -35,7 +35,9 @@ def makeTemplate(filename):
   #template = cv2.Canny(template, 50, 200)
   return template
 
-# Template images to match for. You could plausibly speed this up by moving
+# Template images to match for. You could plausibly speed this up by removing
+# one of MapRadar or MapSangvis, depending on what obstructions there are, i.e.
+# dalao vtuber models. MapSangvis may also be prone to false positives.
 stateToTemplates = {
   VideoState.MAP: [makeTemplate("MapRadar.png"), makeTemplate("MapSangvis.png")],
   VideoState.COMBAT: [makeTemplate("BattlePause.png"), makeTemplate("BattleResume.png")],
@@ -84,6 +86,8 @@ while cap.isOpened():
           # Skip if the frame is somehow smaller than the template.
           if resized.shape[0] < template.shape[0] or resized.shape[1] < template.shape[1]:
             break
+          # TBH I don't know whether TM_CCORR_NORMED or TM_CCOEFF_NORMED is
+          # better here.
           result = cv2.matchTemplate(resized, template, cv2.TM_CCORR_NORMED)
           (_, maxVal, _, maxLoc) = cv2.minMaxLoc(result)
           if maxVal > threshold and (state not in possibleStates or possibleStates[state][0] < maxVal):
