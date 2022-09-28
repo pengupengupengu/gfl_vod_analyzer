@@ -35,6 +35,8 @@ class VideoState(str, Enum):
   MAP = "Map"
   COMBAT = "Combat"
   END = "End"
+  def __str__(self):
+    return str(self.value)
 
 # Image filename to black & white template for matching.
 scriptDir = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
