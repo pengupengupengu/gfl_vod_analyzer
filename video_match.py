@@ -206,7 +206,7 @@ def getMapStateFromFrame(frame, frameIndex, reader):
   turnOcrData = reader.readtext(turnProcessed, detail=0)
   turnOcrString = "".join(turnOcrData)
   # Strip leading 0. Sometimes the "0" with a slash is OCR'd as "2", "8", or "Z".
-  turnOcrString = re.sub(r'^[028]+(.+)', r'\1', re.sub(r'[iI]', '1', re.sub(r'[oOzZ]', '0', turnOcrString)))
+  turnOcrString = re.sub(r'^[02389]+(.+)', r'\1', re.sub(r'[iI]', '1', re.sub(r'[oOsSzZ]', '0', turnOcrString)))
   #cv2.imwrite(sys.argv[1] + f'_{frameIndex}_turn.jpg', turnProcessed)
   if turnOcrString == "" or not turnOcrString.isnumeric():
     turn = None
