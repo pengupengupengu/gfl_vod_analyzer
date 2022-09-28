@@ -75,60 +75,62 @@ if len(frameToState) > 0:
   print(f'Resuming from {frameToDebugString(frameIndex)}')
   cap.set(cv2.CAP_PROP_POS_FRAMES, frameIndex)
 
+def getFrameState(frame, frameIndex):
+  global scalesToCheck
+  # Dict of state -> (normalized correlation, image scale)
+  possibleStates = {}
+
+  gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+  for scale in scalesToCheck:
+    resized = imutils.resize(gray, width = int(gray.shape[1] * scale))
+    # Edge detection doesn't work well for GFL
+    #edged = cv2.Canny(resized, 50, 200)
+    for state in statesToCheck:
+      for template in stateToTemplates[state]:
+        # Skip if the frame is somehow smaller than the template.
+        if resized.shape[0] < template.shape[0] or resized.shape[1] < template.shape[1]:
+          break
+        # TBH I don't know whether TM_CCORR_NORMED or TM_CCOEFF_NORMED is
+        # better here.
+        result = cv2.matchTemplate(resized, template, cv2.TM_CCORR_NORMED)
+        (_, maxVal, _, maxLoc) = cv2.minMaxLoc(result)
+        if maxVal > threshold and (state not in possibleStates or possibleStates[state][0] < maxVal):
+          possibleStates[state] = (maxVal, scale)
+          # Originally, this loop was going to short circuit, but I found
+          # that that didn't really speed up this script, probably because
+          # the frame manipulation is more expensive than the template
+          # matching.
+
+  # Find the most probable state. If this is the first image positively
+  # matched, then also change scalesToCheck to the scale of the match to
+  # speed up future frames.
+  if len(possibleStates) == 0:
+    return VideoState.UNKNOWN
+  elif len(possibleStates) == 1:
+    if len(scalesToCheck) > 1:
+      scalesToCheck = [list(possibleStates.values())[0][1]]
+    return list(possibleStates.keys())[0]
+  else:
+    maxState = VideoState.UNKNOWN
+    maxValue = None
+    for state, value in possibleStates.items():
+      if maxValue is None or value[0] > maxValue[0]:
+        maxState = state
+        maxValue = value
+    if len(scalesToCheck) > 1:
+      scalesToCheck = [maxValue[1]]
+    return maxState
+
 while cap.isOpened():
   ret, frame = cap.read()
   if ret:
     if math.floor(frameIndex / fps) % 10 == 0:
       print(frameToDebugString(frameIndex), flush=True)
-      if len(frameToState) == 0:
+      if len(frameToState) > 0:
         # Save the current frameToState so this script can resume if interrupted
         with open(sys.argv[1] + '_frameToState.json', 'w') as f:
           f.write(json.dumps(frameToState))
-
-    # Dict of state -> (normalized correlation, image scale)
-    possibleStates = {}
-
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    for scale in scalesToCheck:
-      resized = imutils.resize(gray, width = int(gray.shape[1] * scale))
-      # Edge detection doesn't work well for GFL
-      #edged = cv2.Canny(resized, 50, 200)
-      for state in statesToCheck:
-        for template in stateToTemplates[state]:
-          # Skip if the frame is somehow smaller than the template.
-          if resized.shape[0] < template.shape[0] or resized.shape[1] < template.shape[1]:
-            break
-          # TBH I don't know whether TM_CCORR_NORMED or TM_CCOEFF_NORMED is
-          # better here.
-          result = cv2.matchTemplate(resized, template, cv2.TM_CCORR_NORMED)
-          (_, maxVal, _, maxLoc) = cv2.minMaxLoc(result)
-          if maxVal > threshold and (state not in possibleStates or possibleStates[state][0] < maxVal):
-            possibleStates[state] = (maxVal, scale)
-            # Originally, this loop was going to short circuit, but I found
-            # that that didn't really speed up this script, probably because
-            # the frame manipulation is more expensive than the template
-            # matching.
-
-    # Find the most probable state. If this is the first image positively
-    # matched, then also change scalesToCheck to the scale of the match to
-    # speed up future frames.
-    if len(possibleStates) == 0:
-      previousState = VideoState.UNKNOWN
-    elif len(possibleStates) == 1:
-      previousState = list(possibleStates.keys())[0]
-      if len(scalesToCheck) > 1:
-        scalesToCheck = [list(possibleStates.values())[0][1]]
-    else:
-      maxState = VideoState.UNKNOWN
-      maxValue = None
-      for state, value in possibleStates.items():
-        if maxValue is None or value[0] > maxValue[0]:
-          maxState = state
-          maxValue = value
-      previousState = maxState
-      if len(scalesToCheck) > 1:
-        scalesToCheck = [maxValue[1]]
-    frameToState[frameIndex] = previousState
+    frameToState[frameIndex] = getFrameState(frame, frameIndex)
     
     # Go to the next second. You can change this to look at more or less frames.
     frameIndex += fps
@@ -168,6 +170,13 @@ def cropAp(resized, radarMaxLoc, resources2MaxLoc):
   #print("AP", resized.shape, radarMaxLoc, resources2MaxLoc, resources2Template.shape, x1, x2, y1, y2)
   return resized[y1:y2, x1:x2]
 def getMapStateFromFrame(frame, frameIndex, reader):
+  # If the segments are being computed with a complete frameToState, then
+  # scalesToCheck isn't set correctly. We run getFrameState once to just
+  # set scaling.
+  global scalesToCheck
+  if len(scalesToCheck) > 1:
+    getFrameState(frame, frameIndex)
+
   gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
   resized = imutils.resize(gray, width = int(gray.shape[1] * scalesToCheck[0]))
   radarResult = cv2.matchTemplate(resized, radarTemplate, cv2.TM_CCORR_NORMED)
@@ -197,7 +206,7 @@ def getMapStateFromFrame(frame, frameIndex, reader):
   turnOcrData = reader.readtext(turnProcessed, detail=0)
   turnOcrString = "".join(turnOcrData)
   # Strip leading 0. Sometimes the "0" with a slash is OCR'd as "2", "8", or "Z".
-  turnOcrString = re.sub(r'^[028]+(.+)', r'\1', re.sub(r'[oOzZ]', '0', turnOcrString))
+  turnOcrString = re.sub(r'^[028]+(.+)', r'\1', re.sub(r'[iI]', '1', re.sub(r'[oOzZ]', '0', turnOcrString)))
   #cv2.imwrite(sys.argv[1] + f'_{frameIndex}_turn.jpg', turnProcessed)
   if turnOcrString == "" or not turnOcrString.isnumeric():
     turn = None
@@ -220,7 +229,7 @@ def getMapStateFromFrame(frame, frameIndex, reader):
   apOcrData = reader.readtext(apProcessed, detail=0)
   apOcrString = "".join(apOcrData)
   # Strip leading 0 (or "o" or "O").
-  apOcrString = re.sub(r'^0+(.+)', r'\1', re.sub(r'[oO]', '0', apOcrString))
+  apOcrString = re.sub(r'^0+(.+)', r'\1', re.sub(r'[iI]', '1', re.sub(r'[oO]', '0', apOcrString)))
   #cv2.imwrite(sys.argv[1] + f'_{frameIndex}_ap__{apOcrString}.jpg', apProcessed)
   if apOcrString == "" or not apOcrString.isnumeric():
     ap = None
