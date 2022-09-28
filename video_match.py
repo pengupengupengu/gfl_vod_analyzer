@@ -149,8 +149,8 @@ with open(sys.argv[1] + '_frameToState.json', 'w') as f:
 # Crop the score, turn, and remaining AP. This can largely be figured out from
 # where the radar and resources are.
 def cropScore(resized, radarMaxLoc, resources2MaxLoc):
-  x1 = int(radarMaxLoc[0] + (resources2MaxLoc[0] - radarMaxLoc[0]) * 0.5)
-  x2 = int(x1 + (resources2MaxLoc[0] - radarMaxLoc[0]) * 0.1)
+  x1 = int(radarMaxLoc[0] + (resources2MaxLoc[0] - radarMaxLoc[0]) * 0.495)
+  x2 = int(x1 + (resources2MaxLoc[0] - radarMaxLoc[0]) * 0.105)
   y1 = int(resources2MaxLoc[1] + resources2Template.shape[0] * 0.2)
   y2 = int(y1 + resources2Template.shape[0] * 0.45)
   #print("score", resized.shape, radarMaxLoc, resources2MaxLoc, resources2Template.shape, x1, x2, y1, y2)
