@@ -47,14 +47,12 @@ def makeTemplate(filename):
   #template = cv2.Canny(template, 50, 200)
   return template
 
-# Template images to match for. You could plausibly speed this up by removing
-# one of MapRadar or MapSangvis, depending on what obstructions there are, i.e.
-# dalao vtuber models. MapSangvis may also be prone to false positives.
+# Template images to match for.
 radarTemplate = makeTemplate("MapRadar.png")
 resources1Template = makeTemplate("MapResources1.png")
 resources2Template = makeTemplate("MapResources2.png")
 stateToTemplates = {
-  VideoState.MAP: [radarTemplate, makeTemplate("MapSangvis.png")],
+  VideoState.MAP: [radarTemplate, resources2Template],
   VideoState.COMBAT: [makeTemplate("BattlePause.png"), makeTemplate("BattleResume.png")],
 }
 statesToCheck = list(stateToTemplates.keys())
@@ -123,6 +121,24 @@ def getFrameState(frame, frameIndex):
       scalesToCheck = [maxValue[1]]
     return maxState
 
+def calibrateScaling(frame, frameIndex):
+  global scalesToCheck
+  scaleToMaxVal = {}
+  gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+  for scale in scalesToCheck:
+    resized = imutils.resize(gray, width = int(gray.shape[1] * scale))
+    for state in statesToCheck:
+      for template in stateToTemplates[state]:
+        if resized.shape[0] < template.shape[0] or resized.shape[1] < template.shape[1]:
+          break
+        result = cv2.matchTemplate(resized, template, cv2.TM_CCORR_NORMED)
+        (_, maxVal, _, maxLoc) = cv2.minMaxLoc(result)
+        if scale not in scaleToMaxVal or scaleToMaxVal[scale] < maxVal:
+          scaleToMaxVal[scale] = maxVal
+  #print(scaleToMaxVal, flush=True)
+  scalesToCheck = [max(scaleToMaxVal, key=scaleToMaxVal.get)]
+  #print(f'Scaling set to {scalesToCheck[0]}', flush=True)
+
 while cap.isOpened():
   ret, frame = cap.read()
   if ret:
@@ -177,7 +193,7 @@ def getMapStateFromFrame(frame, frameIndex, reader):
   # set scaling.
   global scalesToCheck
   if len(scalesToCheck) > 1:
-    getFrameState(frame, frameIndex)
+    calibrateScaling(frame, frameIndex)
 
   gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
   resized = imutils.resize(gray, width = int(gray.shape[1] * scalesToCheck[0]))
@@ -186,7 +202,8 @@ def getMapStateFromFrame(frame, frameIndex, reader):
   resources2Result = cv2.matchTemplate(resized, resources2Template, cv2.TM_CCORR_NORMED)
   (_, resources2MaxVal, _, resources2MaxLoc) = cv2.minMaxLoc(resources2Result)
   if radarMaxVal < threshold or resources2MaxVal < threshold:
-    #print(f'Can\'t match map items at {frameToDebugString(int(frameIndex))}')
+    #print(f'Can\'t match map items at {frameToDebugString(int(frameIndex))}: ' +
+    #      f'radarMaxVal={radarMaxVal}, resources2MaxVal={resources2MaxVal}, scale={scalesToCheck[0]}')
     return None
 
   scoreProcessed = cropScore(resized, radarMaxLoc, resources2MaxLoc)
@@ -251,6 +268,11 @@ blankMapState = {
   "score": "",
   "ap": ""
 }
+frameToMapState = {}
+if os.path.exists(sys.argv[1] + '_frameToMapState.json'):
+  with open(sys.argv[1] + '_frameToMapState.json', 'r') as f:
+    frameToMapState = json.load(f)
+print('Processing segments...')
 def generateSegments(frameToState, cap, reader):
   segments = []
   mapSegmentFrames = []
@@ -262,27 +284,39 @@ def generateSegments(frameToState, cap, reader):
       startMapState = None
       endMapState = None
       if segmentState == VideoState.MAP and cap.isOpened():
-        for f in mapSegmentFrames[:60]:
+        for f in mapSegmentFrames[:120]:
+          if str(f) in frameToMapState:
+            startMapState = frameToMapState[str(f)]
+            break
           cap.set(cv2.CAP_PROP_POS_FRAMES, int(f))
           ret, frame = cap.read()
           if not ret:
             break
           startMapState = getMapStateFromFrame(frame, int(f), reader)
+          frameToMapState[str(f)] = startMapState
           if startMapState is not None:
             break
-        for f in reversed(mapSegmentFrames[-60:]):
+        for f in reversed(mapSegmentFrames[-120:]):
+          if str(f) in frameToMapState:
+            endMapState = frameToMapState[str(f)]
+            break
           cap.set(cv2.CAP_PROP_POS_FRAMES, int(f))
           ret, frame = cap.read()
           if not ret:
             break
           endMapState = getMapStateFromFrame(frame, int(f), reader)
+          frameToMapState[str(f)] = endMapState
           if endMapState is not None and (startMapState is None or endMapState["score"] >= startMapState["score"]):
             break
       if startMapState is None:
         startMapState = blankMapState
       if endMapState is None:
         endMapState = blankMapState
+      # Save the current frameToMapState so this script can resume if interrupted
+      with open(sys.argv[1] + '_frameToMapState.json', 'w') as f:
+        f.write(json.dumps(frameToMapState))
 
+      print(f'Processed segment at {frameToDebugString(segmentStartFrame)}...')
       segments.append((segmentStartFrame / fps, int(frameIndex) / fps, segmentState, startMapState, endMapState))
 
       segmentStartFrame = int(frameIndex)
