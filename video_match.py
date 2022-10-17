@@ -49,11 +49,10 @@ def makeTemplate(filename):
 
 # Template images to match for.
 radarTemplate = makeTemplate("MapRadar.png")
-resources1Template = makeTemplate("MapResources1.png")
 resources2Template = makeTemplate("MapResources2.png")
 stateToTemplates = {
   VideoState.MAP: [radarTemplate, resources2Template],
-  VideoState.COMBAT: [makeTemplate("BattlePause.png"), makeTemplate("BattleResume.png")],
+  VideoState.COMBAT: [makeTemplate("BattlePause.png")],
 }
 statesToCheck = list(stateToTemplates.keys())
 previousState = VideoState.UNKNOWN
@@ -64,10 +63,12 @@ if os.path.exists(sys.argv[1] + '_frameToState.json'):
 
 # Minimum template match threshold.
 threshold = 0.95
-scalesToCheck = np.linspace(0.2, 1.0, 20)[::-1]
+scalesToCheck = np.linspace(0.2, 2.0, 80)[::-1]
 
 cap = cv2.VideoCapture(sys.argv[1])
 fps = math.floor(cap.get(cv2.CAP_PROP_FPS))
+totalFrames = math.floor(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+print(f'Processing "{sys.argv[1]}" with duration {frameToDebugString(totalFrames)}')
 
 frameIndex = 0
 if len(frameToState) > 0:
@@ -140,6 +141,8 @@ def calibrateScaling(frame, frameIndex):
   #print(f'Scaling set to {scalesToCheck[0]}', flush=True)
 
 while cap.isOpened():
+  if frameIndex > totalFrames:
+    break
   ret, frame = cap.read()
   if ret:
     if math.floor(frameIndex / fps) % 10 == 0:
@@ -285,6 +288,8 @@ def generateSegments(frameToState, cap, reader):
       endMapState = None
       if segmentState == VideoState.MAP and cap.isOpened():
         for f in mapSegmentFrames[:120]:
+          if int(f) > totalFrames:
+            continue
           if str(f) in frameToMapState:
             startMapState = frameToMapState[str(f)]
             break
@@ -297,6 +302,8 @@ def generateSegments(frameToState, cap, reader):
           if startMapState is not None:
             break
         for f in reversed(mapSegmentFrames[-120:]):
+          if int(f) > totalFrames:
+            continue
           if str(f) in frameToMapState:
             endMapState = frameToMapState[str(f)]
             break
