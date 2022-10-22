@@ -1,2 +1,5 @@
 **/Thumbs.db
-
+__pycache__
+templates
+test_images/debug/*
+training_data/*/*/new
